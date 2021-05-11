@@ -118,7 +118,7 @@ app.post('/registration', (req, res) => {
 
   // ユーザーと鍵を登録する
   // credentialPublicKeyをJWKの形式に変換して保存する
-  // TODO RS256にした対応していない
+  // TODO RS256にしか対応していない
   const pubkeyJwk = {
     kty: "RSA",
     n: base64url.encode(key.get(-1)),
@@ -139,7 +139,7 @@ app.post('/registration', (req, res) => {
 
   // TODO debug
   console.log(credentialPublicKey);
-  console.log(storage.get('UZSL85T9AFC'));
+  console.log(storage.get('cc8faa1e-4434-4ec8-a040-b7f80ad43c27'));
 
   // 登録完了
   res.sendStatus(200);
@@ -171,12 +171,78 @@ app.post('/authentication', (req, res) => {
   const JSONtext = cData.toString('utf-8');
   const C = JSON.parse(JSONtext);
 
-  // TODO 手順. 11から
+  // `C.type`の値が`webauthn.get`かどうか確認
+  if (C.type !== "webauthn.get") {
+    throw new Error('C.type is not "webauthn.get"');
+  }
 
+  // `C.challenge`が`options.challenge`をbase64urlエンコードしたものと一致するか確認
+  // TODO challengeが固定値
+  if (C.challenge !== base64url.encode("randomString")) {
+    throw new Error('C.challenge does not match');
+  }
 
-  res.send('auth!');
+  // `C.origin`がRPのオリジンと一致するか確認
+  // TODO オリジンがハードコードされている
+  if (C.origin !== "http://localhost:3000") {
+    throw new Error('C.origin does not match');
+  }
+
+  // rpIdHashを取得
+  const rpIdHash = authData.slice(0, 32);
+  // rpIdHashが想定しているRP IDのSHA-256ハッシュか確認
+  // TODO RP IDがハードコード
+  const rpId = crypto.createHash('sha256').update("localhost").digest();
+  if (!rpId.equals(rpIdHash)) {
+    throw new Error('rpIdHash does not match the expected RP ID hash');
+  }
+
+  // flagsを取得
+  const flags = authData.slice(32, 33).readUInt8(0);
+  // User Presentのフラグ（1bit目）が立っているか確認
+  if (!!(flags & 0x01)) {
+    throw new Error('the user is not present');
+  }
+
+  // signCountを取得
+  const signCount = authData.slice(33, 37).readUInt16BE(0);
+
+  // 署名検証
+  const hash = crypto.createHash('sha256').update(cData).digest();
+  // TODO ユーザーID固定、credentials複数あるときは？
+  const credentialPublicKey = storage.get('cc8faa1e-4434-4ec8-a040-b7f80ad43c27').credentials[0].credentialPublicKey;
+  
+  // TODO alg固定
+  const signature = new jsrsasign.KJUR.crypto.Signature({ "alg": "SHA256withRSA" });
+  signature.init(credentialPublicKey);
+  signature.updateHex(Buffer.concat([authData, hash]).toString('hex'));
+
+  const isValid = signature.verify(sig.toString('hex'));
+  if(!isValid) {
+    throw new Error('Signature validation failed');
+  }
+
+  // signCountを更新
+  // TODO credentials複数のとき
+  const storedSignCount = storage.get('cc8faa1e-4434-4ec8-a040-b7f80ad43c27').credentials[0].signCount;
+
+  // signCountが前回のsignCountと同じ、もしくは少ない場合はクローンされた認証器の利用が疑われる。エラーにしとく
+  if((signCount !== 0 || storedSignCount !== 0) &&
+    (signCount == storedSignCount || signCount < storedSignCount ))  {
+      throw new Error('signCount is invalid');
+  }
+
+  // 問題なければ`authData.signCount`で更新
+  const credentials = storage.get('cc8faa1e-4434-4ec8-a040-b7f80ad43c27').credentials[0];
+  credentials = {...credentials, signCount };
+
+  // TODO debug
+  console.log(storage.get('cc8faa1e-4434-4ec8-a040-b7f80ad43c27'));
+
+  res.sendStatus(200);
 });
 
+// Starts the HTTP server listening for connections.
 app.listen(port, () => {
   console.log(`Example app listening at http://localhost:${port}`)
 })
