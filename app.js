@@ -74,8 +74,10 @@ app.post('/registration', (req, res) => {
   // flagsを取得
   const flags = authData.slice(0, 1).readUInt8(0);
   authData = authData.slice(1);
+
   // User Presentのフラグ（1bit目）が立っているか確認
-  if (!!(flags & 0x01)) {
+  const up = !!(flags & 0x01);
+  if (!up) {
     throw new Error('the user is not present');
   }
 
@@ -105,7 +107,7 @@ app.post('/registration', (req, res) => {
   // algが鍵の作成時に`options.pubKeyCredParams`で指定したものになっているか確認する
   // TODO 判定するalgがハードコード
   const alg = credentialPublicKey.get(3);
-  if (alg != -7 || alg != -257) {
+  if (alg != -7 && alg != -257) {
     throw new Error('alg does not match');
   }
 
@@ -121,8 +123,8 @@ app.post('/registration', (req, res) => {
   // TODO RS256にしか対応していない
   const pubkeyJwk = {
     kty: "RSA",
-    n: base64url.encode(key.get(-1)),
-    e: base64url.encode(key.get(-2))
+    n: base64url.encode(credentialPublicKey.get(-1)),
+    e: base64url.encode(credentialPublicKey.get(-2))
   }
 
   // TODO ユーザーIDが固定
@@ -148,7 +150,10 @@ app.post('/registration', (req, res) => {
 // authentication-start: 認証開始
 app.post('/authentication-start', (req, res) => {
   // TODO
-  res.send('TODO');
+  const credentialId = storage.get('cc8faa1e-4434-4ec8-a040-b7f80ad43c27').credentials[0].credentialId;
+  res.send({
+    credentialId
+  });
 });
 
 // authentication: 認証する
@@ -200,25 +205,29 @@ app.post('/authentication', (req, res) => {
   // flagsを取得
   const flags = authData.slice(32, 33).readUInt8(0);
   // User Presentのフラグ（1bit目）が立っているか確認
-  if (!!(flags & 0x01)) {
+  const up = !!(flags & 0x01);
+  if (!up) {
     throw new Error('the user is not present');
   }
 
   // signCountを取得
-  const signCount = authData.slice(33, 37).readUInt16BE(0);
+  const signCount = authData.slice(33, 37).readUInt32BE(0);
+
+  // TODO debug
+  console.log('signCount: ', signCount);
 
   // 署名検証
   const hash = crypto.createHash('sha256').update(cData).digest();
   // TODO ユーザーID固定、credentials複数あるときは？
   const credentialPublicKey = storage.get('cc8faa1e-4434-4ec8-a040-b7f80ad43c27').credentials[0].credentialPublicKey;
-  
+
   // TODO alg固定
   const signature = new jsrsasign.KJUR.crypto.Signature({ "alg": "SHA256withRSA" });
   signature.init(credentialPublicKey);
   signature.updateHex(Buffer.concat([authData, hash]).toString('hex'));
 
   const isValid = signature.verify(sig.toString('hex'));
-  if(!isValid) {
+  if (!isValid) {
     throw new Error('Signature validation failed');
   }
 
@@ -227,14 +236,17 @@ app.post('/authentication', (req, res) => {
   const storedSignCount = storage.get('cc8faa1e-4434-4ec8-a040-b7f80ad43c27').credentials[0].signCount;
 
   // signCountが前回のsignCountと同じ、もしくは少ない場合はクローンされた認証器の利用が疑われる。エラーにしとく
-  if((signCount !== 0 || storedSignCount !== 0) &&
-    (signCount == storedSignCount || signCount < storedSignCount ))  {
-      throw new Error('signCount is invalid');
+  if ((signCount !== 0 || storedSignCount !== 0) &&
+    (signCount == storedSignCount || signCount < storedSignCount)) {
+    throw new Error('signCount is invalid');
   }
+
+  // TODO debug
+  console.log('storedSignCount: ', storedSignCount);
 
   // 問題なければ`authData.signCount`で更新
   const credentials = storage.get('cc8faa1e-4434-4ec8-a040-b7f80ad43c27').credentials[0];
-  credentials = {...credentials, signCount };
+  credentials.signCount = signCount;
 
   // TODO debug
   console.log(storage.get('cc8faa1e-4434-4ec8-a040-b7f80ad43c27'));
