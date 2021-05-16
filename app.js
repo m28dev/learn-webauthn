@@ -23,8 +23,46 @@ app.get('/', (req, res) => {
 
 // registration-start: 鍵の登録を開始する
 app.post('/registration-start', (req, res) => {
-  // TODO
-  res.send('TODO');
+  // TODO ユーザー名とか受け取る
+  // TODO 定数にする → RP ID, alg
+
+  // ユーザーIDを生成
+  const id = crypto.randomUUID();
+
+  // チャレンジを生成
+  // TODO 保存する
+  const challenge = randomBytes(16).toString('hex');
+
+  // PublicKeyCredentialCreationOptionsを生成
+  const options = {
+    rp: {
+      id: "learn-webauthn"
+    },
+    user: {
+      id,
+      displayName: "msy",
+      name: "msy"
+    },
+    challenge,
+    pubKeyCredParams: [
+      {
+        alg: -257,
+        type: "public-key"
+      },
+      {
+        alg: -7,
+        type: "public-key"
+      }
+    ],
+    timeout: 360000,
+    authenticatorSelection: {
+      residentKey: "preferred",
+      userVerification: "preferred"
+    },
+    attestation: "none"
+  }
+
+  res.json({ options });
 });
 
 // registration: 鍵を登録する
