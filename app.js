@@ -175,7 +175,7 @@ app.post('/registration', (req, res) => {
       credentialPublicKey: pubkeyJwk,
       signCount: signCount.readUInt16BE(0)
     }]
-  });
+  }); // TODO transports も保存したほうがいいかな？
 
   // TODO debug
   console.log(credentialPublicKey);
@@ -187,6 +187,18 @@ app.post('/registration', (req, res) => {
 
 // authentication-start: 認証開始
 app.post('/authentication-start', (req, res) => {
+  // TODO 保存する
+  const challenge = randomBytes(16).toString('hex');
+  const timeout = 120000;
+  // TODO そのユーザーのクレデンシャルを返す
+  const allowCredentials = [{
+    type: 'public-key',
+    id: 'cc8faa1e-4434-4ec8-a040-b7f80ad43c27'
+  }];
+  // TODO allowCredentialsがない場合はrequiredではないか？
+  const userVerification = 'preferred';
+  const options = { challenge, timeout, allowCredentials, userVerification }
+
   // TODO
   const credentialId = storage.get('cc8faa1e-4434-4ec8-a040-b7f80ad43c27').credentials[0].credentialId;
   res.send({
