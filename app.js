@@ -1,6 +1,6 @@
 const express = require('express');
 const path = require('path');
-const cookieSession = require('cookie-session')
+const session = require('express-session');
 
 const cbor = require('cbor');
 const crypto = require('crypto');
@@ -17,6 +17,13 @@ app.set('view engine', 'ejs');
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
+app.use(session({
+  secret: process.env.COOKIE_SECRET || 'A2ey6LdvDg5NRrvC',
+  resave: false,
+  saveUninitialized: false,
+//  proxy: true,
+  cookie: { secure: auto }
+}));
 
 // credential storage
 const storage = new Map();
