@@ -1,6 +1,10 @@
 // 鍵の登録を開始
 async function registration() {
     // TODO
+    // - オプションをRPから取得
+    // - create()を呼ぶ
+    // - RPにresponseを送る
+    // - メッセージを出す「ユーザーを登録しました」
     const options = {
         rp: {
             name: "learn-webauthn",

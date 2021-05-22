@@ -1,5 +1,6 @@
 const express = require('express');
 const path = require('path');
+const cookieSession = require('cookie-session')
 
 const cbor = require('cbor');
 const crypto = require('crypto');
@@ -10,18 +11,23 @@ const base64url = require('base64url');
 const app = express();
 const port = 3000;
 
+// view engine setup
+app.set('views', path.join(__dirname, 'views'));
+app.set('view engine', 'ejs');
+
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
 // credential storage
 const storage = new Map();
 
-// TODO index router
+/* home page */
 app.get('/', (req, res) => {
-  res.send('Hello World!')
-})
+  // TODO
+  res.render('index');
+});
 
-// registration-start: 鍵の登録を開始する
+/* registration-start: 鍵の登録を開始する */
 app.post('/registration-start', (req, res) => {
   // TODO ユーザー名とか受け取る
   // TODO 定数にする → RP ID, alg
@@ -65,7 +71,7 @@ app.post('/registration-start', (req, res) => {
   res.json({ options });
 });
 
-// registration: 鍵を登録する
+/* registration: 鍵を登録する */
 app.post('/registration', (req, res) => {
   const attestationObject = Buffer.from(req.body.response.attestationObject, 'base64');
   const JSONtext = Buffer.from(req.body.response.clientDataJSON, 'base64').toString('utf8');
@@ -185,7 +191,7 @@ app.post('/registration', (req, res) => {
   res.sendStatus(200);
 });
 
-// authentication-start: 認証開始
+/* authentication-start: 認証開始 */
 app.post('/authentication-start', (req, res) => {
   // TODO 保存する
   const challenge = randomBytes(16).toString('hex');
@@ -206,7 +212,7 @@ app.post('/authentication-start', (req, res) => {
   });
 });
 
-// authentication: 認証する
+/* authentication: 認証する */
 app.post('/authentication', (req, res) => {
   // TODO debug → user.idになる
   console.log('userHandle: ', Buffer.from(req.body.response.userHandle, 'base64').toString());
@@ -302,6 +308,13 @@ app.post('/authentication', (req, res) => {
   console.log(storage.get('cc8faa1e-4434-4ec8-a040-b7f80ad43c27'));
 
   res.sendStatus(200);
+});
+
+/* welcome: ログイン後のページ */
+app.get('/welcome', (req, res) => {
+  // TODO
+  const user = { username: 'testtest' };
+  res.render('welcome', { user });
 });
 
 // Starts the HTTP server listening for connections.
