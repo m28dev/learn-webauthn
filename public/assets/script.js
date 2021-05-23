@@ -1,38 +1,35 @@
-// 鍵の登録を開始
+// ユーザー登録（鍵の登録）
 async function registration() {
-    // TODO
-    // - オプションをRPから取得
-    // - create()を呼ぶ
-    // - RPにresponseを送る
-    // - メッセージを出す「ユーザーを登録しました」
-    const options = {
-        rp: {
-            name: "learn-webauthn",
-            // id: "learn-webauthn.aoiro27go.xyz"
+
+    // ユーザー名を取得
+    const username = document.getElementById('username').value;
+    if (!username) return false; // TODO onSubmit + requiredの方がいいのかも
+
+    // 鍵生成のオプションをRPサーバーから取得
+    const opResponse = await fetch('/registration-start', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {
+            'Content-Type': 'application/json'
         },
-        user: {
-            id: Uint8Array.from("cc8faa1e-4434-4ec8-a040-b7f80ad43c27", c => c.charCodeAt(0)),
-            name: "msy", // twiterアカウント名 @xxxx
-            displayName: "msy", // twitter表示名 yyy みたいな関係性？
-        },
-        challenge: Uint8Array.from('randomString', c => c.charCodeAt(0)),
-        pubKeyCredParams: [{ alg: -257, type: "public-key" }, { alg: -7, type: "public-key" }],
-        timeout: 360000,
-        /*
-                authenticatorSelection: {
-                    residentKey: "required",
-                    requireResidentKey: true,
-                    userVerification: "required"
-                },
-        */
-        attestation: "none"
-    };
+        body: JSON.stringify({ username })
+    });
+
+    if (!opResponse.ok) {
+        console.error('Error Response:', opResponse);
+    }
+
+    // 取得したオプションを認証器に渡し、鍵を生成してもらう
+    const { options } = await opResponse.json();
+    options.user.id = Uint8Array.from(options.user.id, c => c.charCodeAt(0));
+    options.challenge = Uint8Array.from(options.challenge, c => c.charCodeAt(0));
 
     const credential = await navigator.credentials.create({ publicKey: options });
 
-    // 登録する鍵を送る
-    const result = await fetch('/registration', {
+    // 登録する鍵をRPサーバーに送信
+    const regResponse = await fetch('/registration', {
         method: 'POST',
+        credentials: 'same-origin',
         headers: {
             'Content-Type': 'application/json'
         },
@@ -43,7 +40,10 @@ async function registration() {
             }
         })
     });
-    console.log(result);
+
+    // 結果を画面に表示
+    const message = regResponse.ok ? '登録しました！ログインしてみましょう' : 'エラーが発生しました';
+    document.getElementById('message').innerText = message;
 }
 
 // 認証を開始

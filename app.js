@@ -21,61 +21,78 @@ app.use(session({
   secret: process.env.COOKIE_SECRET || 'A2ey6LdvDg5NRrvC',
   resave: false,
   saveUninitialized: false,
-//  proxy: true,
-  cookie: { secure: auto }
+  cookie: { secure: 'auto' }
 }));
 
 // credential storage
 const storage = new Map();
 
+// Values
+const RPID = process.env.RPID || 'localhost';
+const ORIGIN = process.env.ORIGIN || 'http://localhost:3000';
+const PUB_KEYS = [
+  {
+    alg: -257,
+    type: "public-key"
+  },
+  {
+    alg: -7,
+    type: "public-key"
+  }
+];
+
 /* home page */
 app.get('/', (req, res) => {
-  // TODO
   res.render('index');
 });
 
 /* registration-start: 鍵の登録を開始する */
-app.post('/registration-start', (req, res) => {
-  // TODO ユーザー名とか受け取る
-  // TODO 定数にする → RP ID, alg
+app.post('/registration-start', async (req, res, next) => {
+  try {
+    // セッションを初期化
+    await new Promise((resolve, reject) => {
+      req.session.regenerate(err => {
+        err ? reject(err) : resolve();
+      });
+    });
 
-  // ユーザーIDを生成
-  const id = crypto.randomUUID();
+    // ユーザー名を取得
+    const username = req.body.username;
+    // ユーザーIDを生成
+    const id = crypto.randomUUID();
 
-  // チャレンジを生成
-  // TODO 保存する
-  const challenge = randomBytes(16).toString('hex');
+    // ユーザー情報をセッションに保存
+    req.session.regUser = { id, username };
 
-  // PublicKeyCredentialCreationOptionsを生成
-  const options = {
-    rp: {
-      id: "learn-webauthn"
-    },
-    user: {
-      id,
-      displayName: "msy",
-      name: "msy"
-    },
-    challenge,
-    pubKeyCredParams: [
-      {
-        alg: -257,
-        type: "public-key"
+    // チャレンジを生成し、セッションに保存する
+    const challenge = crypto.randomBytes(32).toString('hex');
+    req.session.regChallenge = challenge;
+
+    // `PublicKeyCredentialCreationOptions`を生成
+    const options = {
+      rp: {
+        name: "learn-webauthn"
       },
-      {
-        alg: -7,
-        type: "public-key"
-      }
-    ],
-    timeout: 360000,
-    authenticatorSelection: {
-      residentKey: "preferred",
-      userVerification: "preferred"
-    },
-    attestation: "none"
-  }
+      user: {
+        id,
+        displayName: username,
+        name: username
+      },
+      challenge,
+      pubKeyCredParams: PUB_KEYS,
+      timeout: 360000,
+      authenticatorSelection: {
+        residentKey: "preferred",
+        userVerification: "preferred"
+      },
+      attestation: "none"
+    }
 
-  res.json({ options });
+    res.json({ options });
+
+  } catch (err) {
+    next(err);
+  }
 });
 
 /* registration: 鍵を登録する */
@@ -90,14 +107,13 @@ app.post('/registration', (req, res) => {
   }
 
   // `C.challenge`が`options.challenge`をbase64urlエンコードしたものと一致するか確認
-  // TODO challengeが固定値
-  if (C.challenge !== base64url.encode("randomString")) {
+  const challengeValue = req.session.regChallenge;
+  if (!challengeValue || C.challenge !== base64url.encode(challengeValue)) {
     throw new Error('C.challenge does not match');
   }
 
   // `C.origin`がRPのオリジンと一致するか確認
-  // TODO オリジンがハードコードされている
-  if (C.origin !== "http://localhost:3000") {
+  if (C.origin !== ORIGIN) {
     throw new Error('C.origin does not match');
   }
 
@@ -116,8 +132,7 @@ app.post('/registration', (req, res) => {
   const rpIdHash = authData.slice(0, 32);
   authData = authData.slice(32);
   // rpIdHashが想定しているRP IDのSHA-256ハッシュか確認
-  // TODO RP IDがハードコード
-  const rpId = crypto.createHash('sha256').update("localhost").digest();
+  const rpId = crypto.createHash('sha256').update(RPID).digest();
   if (!rpId.equals(rpIdHash)) {
     throw new Error('rpIdHash does not match the expected RP ID hash');
   }
@@ -178,21 +193,19 @@ app.post('/registration', (req, res) => {
     e: base64url.encode(credentialPublicKey.get(-2))
   }
 
-  // TODO ユーザーIDが固定
   // TODO 保存する内容これでOK？ よむ： https://www.w3.org/TR/webauthn-2/#dom-publickeycredentialcreationoptions-user
-  storage.set('cc8faa1e-4434-4ec8-a040-b7f80ad43c27', {
-    name: 'msy',
-    displayName: 'msy',
-    credentials: [{ // TODO 上書きしちゃってる…2つ登録したときの挙動ってどうなるんだっけ
+  const userid = req.session.regUser.id;
+  const username = req.session.regUser.username
+
+  storage.set(userid, {
+    name: username,
+    displayName: username,
+    credentials: [{
       credentialId: credentialId.toString('base64'),
       credentialPublicKey: pubkeyJwk,
       signCount: signCount.readUInt16BE(0)
     }]
   }); // TODO transports も保存したほうがいいかな？
-
-  // TODO debug
-  console.log(credentialPublicKey);
-  console.log(storage.get('cc8faa1e-4434-4ec8-a040-b7f80ad43c27'));
 
   // 登録完了
   res.sendStatus(200);
@@ -322,6 +335,12 @@ app.get('/welcome', (req, res) => {
   // TODO
   const user = { username: 'testtest' };
   res.render('welcome', { user });
+});
+
+// error handler
+app.use((err, req, res, next) => {
+  console.error(`====Error====\n${err}`);
+  res.sendStatus(500);
 });
 
 // Starts the HTTP server listening for connections.
