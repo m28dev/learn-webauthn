@@ -212,30 +212,62 @@ app.post('/registration', (req, res) => {
 });
 
 /* authentication-start: 認証開始 */
-app.post('/authentication-start', (req, res) => {
-  // TODO 保存する
-  const challenge = randomBytes(16).toString('hex');
-  const timeout = 120000;
-  // TODO そのユーザーのクレデンシャルを返す
-  const allowCredentials = [{
-    type: 'public-key',
-    id: 'cc8faa1e-4434-4ec8-a040-b7f80ad43c27'
-  }];
-  // TODO allowCredentialsがない場合はrequiredではないか？
-  const userVerification = 'preferred';
-  const options = { challenge, timeout, allowCredentials, userVerification }
+app.post('/authentication-start', async (req, res, next) => {
+  try {
+    // セッションを初期化
+    await new Promise((resolve, reject) => {
+      req.session.regenerate(err => {
+        err ? reject(err) : resolve();
+      });
+    });
 
-  // TODO
-  const credentialId = storage.get('cc8faa1e-4434-4ec8-a040-b7f80ad43c27').credentials[0].credentialId;
-  res.send({
-    credentialId
-  });
+    // ユーザー名を取得
+    const username = req.body.username;
+
+    // ログインユーザー情報をDBから取得
+    let userId, userInfo;
+    for (let [k, v] of storage.entries()) {
+      if (v.name == username) {
+        userId = k;
+        userInfo = v;
+        break;
+      }
+    }
+
+    // ユーザーIDをセッションに保存
+    req.session.authUserId = userId;
+
+    // チャレンジを生成、セッションに保存
+    const challenge = crypto.randomBytes(32).toString('hex');
+    req.session.authChallenge = challenge;
+
+    // ユーザーが登録している鍵のクレデンシャルIDを用意
+    const allowCredentials = storage.get(userId).credentials.map(cred => {
+      return {
+        type: 'public-key',
+        id: cred.credentialId
+      };
+    });
+
+    // `PublicKeyCredentialRequestOptions`を生成
+    const options = {
+      challenge,
+      timeout: 120000,
+      allowCredentials,
+      userVerification: 'preferred',
+    }
+
+    res.json({ options });
+
+  } catch (err) {
+    next(err);
+  }
 });
 
 /* authentication: 認証する */
 app.post('/authentication', (req, res) => {
   // TODO debug → user.idになる
-  console.log('userHandle: ', Buffer.from(req.body.response.userHandle, 'base64').toString());
+  //console.log('userHandle: ', Buffer.from(req.body.response.userHandle, 'base64').toString());
 
   // TODO
   // - 手順.5 options.allowCredentialsで渡した中にあったcredential.idか確認
@@ -258,22 +290,20 @@ app.post('/authentication', (req, res) => {
   }
 
   // `C.challenge`が`options.challenge`をbase64urlエンコードしたものと一致するか確認
-  // TODO challengeが固定値
-  if (C.challenge !== base64url.encode("randomString")) {
+  const challengeValue = req.session.authChallenge;
+  if (!challengeValue || C.challenge !== base64url.encode(challengeValue)) {
     throw new Error('C.challenge does not match');
   }
 
   // `C.origin`がRPのオリジンと一致するか確認
-  // TODO オリジンがハードコードされている
-  if (C.origin !== "http://localhost:3000") {
+  if (C.origin !== ORIGIN) {
     throw new Error('C.origin does not match');
   }
 
   // rpIdHashを取得
   const rpIdHash = authData.slice(0, 32);
   // rpIdHashが想定しているRP IDのSHA-256ハッシュか確認
-  // TODO RP IDがハードコード
-  const rpId = crypto.createHash('sha256').update("localhost").digest();
+  const rpId = crypto.createHash('sha256').update(RPID).digest();
   if (!rpId.equals(rpIdHash)) {
     throw new Error('rpIdHash does not match the expected RP ID hash');
   }
@@ -289,13 +319,19 @@ app.post('/authentication', (req, res) => {
   // signCountを取得
   const signCount = authData.slice(33, 37).readUInt32BE(0);
 
-  // TODO debug
-  console.log('signCount: ', signCount);
-
   // 署名検証
   const hash = crypto.createHash('sha256').update(cData).digest();
-  // TODO ユーザーID固定、credentials複数あるときは？
-  const credentialPublicKey = storage.get('cc8faa1e-4434-4ec8-a040-b7f80ad43c27').credentials[0].credentialPublicKey;
+
+  // TODO 鍵を取得。バリデーションはここじゃないかも
+  const userid = req.session.authUserId;
+  if (!userid || !storage.has(userid)) {
+    throw new Error('User not found');
+  }
+  
+  const userInfo = storage.get(userid);
+
+  const credentialIndex = userInfo.credentials.findIndex(cred => cred.credentialId == credentialId);
+  const credentialPublicKey = userInfo.credentials[credentialIndex].credentialPublicKey;
 
   // TODO alg固定
   const signature = new jsrsasign.KJUR.crypto.Signature({ "alg": "SHA256withRSA" });
@@ -309,7 +345,7 @@ app.post('/authentication', (req, res) => {
 
   // signCountを更新
   // TODO credentials複数のとき
-  const storedSignCount = storage.get('cc8faa1e-4434-4ec8-a040-b7f80ad43c27').credentials[0].signCount;
+  const storedSignCount = userInfo.credentials[credentialIndex].signCount;
 
   // signCountが前回のsignCountと同じ、もしくは少ない場合はクローンされた認証器の利用が疑われる。エラーにしとく
   if ((signCount !== 0 || storedSignCount !== 0) &&
@@ -317,15 +353,8 @@ app.post('/authentication', (req, res) => {
     throw new Error('signCount is invalid');
   }
 
-  // TODO debug
-  console.log('storedSignCount: ', storedSignCount);
-
   // 問題なければ`authData.signCount`で更新
-  const credentials = storage.get('cc8faa1e-4434-4ec8-a040-b7f80ad43c27').credentials[0];
-  credentials.signCount = signCount;
-
-  // TODO debug
-  console.log(storage.get('cc8faa1e-4434-4ec8-a040-b7f80ad43c27'));
+  userInfo.credentials[credentialIndex].signCount = signCount;
 
   res.sendStatus(200);
 });
@@ -339,11 +368,11 @@ app.get('/welcome', (req, res) => {
 
 // error handler
 app.use((err, req, res, next) => {
-  console.error(`====Error====\n${err}`);
+  console.error(err);
   res.sendStatus(500);
 });
 
 // Starts the HTTP server listening for connections.
 app.listen(port, () => {
-  console.log(`Example app listening at http://localhost:${port}`)
-})
+  console.log(`Example app listening at http://localhost:${port}`);
+});

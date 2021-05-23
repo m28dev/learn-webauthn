@@ -16,7 +16,7 @@ async function registration() {
     });
 
     if (!opResponse.ok) {
-        console.error('Error Response:', opResponse);
+        return console.error('ErrorResponse:', opResponse);
     }
 
     // 取得したオプションを認証器に渡し、鍵を生成してもらう
@@ -42,42 +42,51 @@ async function registration() {
     });
 
     // 結果を画面に表示
-    const message = regResponse.ok ? '登録しました！ログインしてみましょう' : 'エラーが発生しました';
+    const message = regResponse.ok ? '登録しました！ログインしてみてください' : 'エラーが発生しました';
     document.getElementById('message').innerText = message;
 }
 
-// 認証を開始
+// ユーザー認証
 async function authentication() {
-    // TODO
-    const op = await fetch('/authentication-start', {
+
+    // ユーザー名を取得
+    const username = document.getElementById('username').value;
+    if (!username) return false; // TODO
+
+    // 認証器からアサーションをもらうためのオプションを用意
+    const opResponse = await fetch('/authentication-start', {
         method: 'POST',
+        credentials: 'same-origin',
         headers: {
             'Content-Type': 'application/json'
         },
-        body: JSON.stringify({
-            name: 'msy'
-        })
-    }).then(response => response.json());
+        body: JSON.stringify({ username })
+    });
 
-    const options = {
-        challenge: Uint8Array.from('randomString', c => c.charCodeAt(0)),
-        allowCredentials: [{
-            type: "public-key",
-            id: Uint8Array.from(atob(op.credentialId), c => c.charCodeAt(0))
-        }]
+    if (!opResponse.ok) {
+        return console.error('ErrorResponse:', opResponse);
     }
+
+    // 取得したオプションを認証器に渡しアサーションレスポンスをもらう
+    const { options } = await opResponse.json();
+    options.challenge = Uint8Array.from(options.challenge, c => c.charCodeAt(0));
+    options.allowCredentials = options.allowCredentials.map(credential => Object.assign({},
+        credential, {
+        id: Uint8Array.from(atob(credential.id), c => c.charCodeAt(0))
+    }));
 
     const credential = await navigator.credentials.get({ publicKey: options });
 
-    // 認証する
-    const result = await fetch('/authentication', {
+    // RPサーバーにアサーションレスポンスを送り検証する
+    const authResponse = await fetch('/authentication', {
         method: 'POST',
+        credentials: 'same-origin',
         headers: {
             'Content-Type': 'application/json'
         },
         body: JSON.stringify({
             credential: {
-                id: op.credentialId
+                id: btoa(String.fromCharCode(...new Uint8Array(credential.rawId)))
             },
             response: {
                 authenticatorData: btoa(String.fromCharCode(...new Uint8Array(credential.response.authenticatorData))),
@@ -87,7 +96,10 @@ async function authentication() {
             }
         })
     });
-    console.log(result);
+
+    // 結果を画面に表示
+    const message = authResponse.ok ? 'ログイン成功！' : 'エラーが発生しました'; // TODO
+    document.getElementById('message').innerText = message;
 }
 
 // イベントハンドラ登録
