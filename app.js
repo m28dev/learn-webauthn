@@ -59,7 +59,9 @@ app.post('/registration-start', async (req, res, next) => {
     // ユーザー名を取得
     const username = req.body.username;
     // ユーザーIDを生成
-    const id = crypto.randomUUID();
+    // 本来はユーザーを特定できない識別子にすべき
+    // サンプルの仕様上、あとで扱いやすいユーザー名をIDとしている
+    const id = username/* crypto.randomUUID() */;
 
     // ユーザー情報をセッションに保存
     req.session.regUser = { id, username };
@@ -225,14 +227,8 @@ app.post('/authentication-start', async (req, res, next) => {
     const username = req.body.username;
 
     // ログインユーザー情報をDBから取得
-    let userId, userInfo;
-    for (let [k, v] of storage.entries()) {
-      if (v.name == username) {
-        userId = k;
-        userInfo = v;
-        break;
-      }
-    }
+    const userId = username;
+    const userInfo = storage.get(userId);
 
     // ユーザーIDをセッションに保存
     req.session.authUserId = userId;
@@ -242,7 +238,7 @@ app.post('/authentication-start', async (req, res, next) => {
     req.session.authChallenge = challenge;
 
     // ユーザーが登録している鍵のクレデンシャルIDを用意
-    const allowCredentials = storage.get(userId).credentials.map(cred => {
+    const allowCredentials = userInfo.credentials.map(cred => {
       return {
         type: 'public-key',
         id: cred.credentialId
