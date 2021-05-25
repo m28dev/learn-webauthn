@@ -33,11 +33,13 @@ const ORIGIN = process.env.ORIGIN || 'http://localhost:3000';
 const PUB_KEYS = [
   {
     alg: -257,
-    type: "public-key"
+    type: "public-key",
+    algName: "SHA256withRSA"
   },
   {
     alg: -7,
-    type: "public-key"
+    type: "public-key",
+    algName: "SHA256withECDSA"
   }
 ];
 
@@ -81,7 +83,9 @@ app.post('/registration-start', async (req, res, next) => {
         name: username
       },
       challenge,
-      pubKeyCredParams: PUB_KEYS,
+      pubKeyCredParams: PUB_KEYS.map(({ alg, type }) => {
+        return { alg, type }
+      }),
       timeout: 360000,
       authenticatorSelection: {
         residentKey: "preferred",
@@ -173,9 +177,9 @@ app.post('/registration', (req, res) => {
   const credentialPublicKey = cbor.decodeAllSync(authData)[0];
 
   // algが鍵の作成時に`options.pubKeyCredParams`で指定したものになっているか確認する
-  // TODO 判定するalgがハードコード
   const alg = credentialPublicKey.get(3);
-  if (alg != -7 && alg != -257) {
+  const hasAlg = PUB_KEYS.some(obj => obj.alg == alg);
+  if (!hasAlg) {
     throw new Error('alg does not match');
   }
 
@@ -323,7 +327,7 @@ app.post('/authentication', (req, res) => {
   if (!userid || !storage.has(userid)) {
     throw new Error('User not found');
   }
-  
+
   const userInfo = storage.get(userid);
 
   const credentialIndex = userInfo.credentials.findIndex(cred => cred.credentialId == credentialId);
