@@ -30,14 +30,17 @@ const storage = new Map();
 // Values
 const RPID = process.env.RPID || 'localhost';
 const ORIGIN = process.env.ORIGIN || 'http://localhost:3000';
+
+const COSE_ALGORITHM_RS256 = -257;
+const COSE_ALGORITHM_ES256 = -7;
 const PUB_KEYS = [
   {
-    alg: -257,
+    alg: COSE_ALGORITHM_RS256,
     type: "public-key",
     algName: "SHA256withRSA"
   },
   {
-    alg: -7,
+    alg: COSE_ALGORITHM_ES256,
     type: "public-key",
     algName: "SHA256withECDSA"
   }
@@ -178,8 +181,8 @@ app.post('/registration', (req, res) => {
 
   // algが鍵の作成時に`options.pubKeyCredParams`で指定したものになっているか確認する
   const alg = credentialPublicKey.get(3);
-  const hasAlg = PUB_KEYS.some(obj => obj.alg == alg);
-  if (!hasAlg) {
+  const pubKeyParam = PUB_KEYS.find(obj => obj.alg == alg);
+  if (!pubKeyParam) {
     throw new Error('alg does not match');
   }
 
@@ -192,11 +195,29 @@ app.post('/registration', (req, res) => {
 
   // ユーザーと鍵を登録する
   // credentialPublicKeyをJWKの形式に変換して保存する
-  // TODO RS256にしか対応していない
-  const pubkeyJwk = {
-    kty: "RSA",
-    n: base64url.encode(credentialPublicKey.get(-1)),
-    e: base64url.encode(credentialPublicKey.get(-2))
+  let pubkeyJwk;
+
+  switch (alg) {
+    case COSE_ALGORITHM_ES256:
+      pubkeyJwk = {
+        kty: "EC",
+        crv: "P-256",
+        x: base64url.encode(credentialPublicKey.get(-2)),
+        y: base64url.encode(credentialPublicKey.get(-3))
+      };
+      break;
+
+    case COSE_ALGORITHM_RS256:
+      pubkeyJwk = {
+        kty: "RSA",
+        n: base64url.encode(credentialPublicKey.get(-1)),
+        e: base64url.encode(credentialPublicKey.get(-2))
+      };
+      break;
+
+    default:
+      pubkeyJwk = null;
+      break;
   }
 
   // TODO 保存する内容これでOK？ よむ： https://www.w3.org/TR/webauthn-2/#dom-publickeycredentialcreationoptions-user
@@ -209,6 +230,7 @@ app.post('/registration', (req, res) => {
     credentials: [{
       credentialId: credentialId.toString('base64'),
       credentialPublicKey: pubkeyJwk,
+      credentialAlgorithm: pubKeyParam.algName,
       signCount: signCount.readUInt16BE(0)
     }]
   }); // TODO transports も保存したほうがいいかな？
@@ -332,9 +354,9 @@ app.post('/authentication', (req, res) => {
 
   const credentialIndex = userInfo.credentials.findIndex(cred => cred.credentialId == credentialId);
   const credentialPublicKey = userInfo.credentials[credentialIndex].credentialPublicKey;
+  const credentialAlgorithm = userInfo.credentials[credentialIndex].credentialAlgorithm;
 
-  // TODO alg固定
-  const signature = new jsrsasign.KJUR.crypto.Signature({ "alg": "SHA256withRSA" });
+  const signature = new jsrsasign.KJUR.crypto.Signature({ alg: credentialAlgorithm });
   signature.init(credentialPublicKey);
   signature.updateHex(Buffer.concat([authData, hash]).toString('hex'));
 
