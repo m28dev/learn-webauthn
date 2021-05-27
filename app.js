@@ -235,6 +235,9 @@ app.post('/registration', (req, res) => {
     }]
   }); // TODO transports も保存したほうがいいかな？
 
+// DEBUG
+console.log('alg:', pubKeyParam.algName);
+
   // 登録完了
   res.sendStatus(200);
 });
