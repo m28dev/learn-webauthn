@@ -31,18 +31,18 @@ const storage = new Map();
 const RPID = process.env.RPID || 'localhost';
 const ORIGIN = process.env.ORIGIN || 'http://localhost:3000';
 
-const COSE_ALGORITHM_RS256 = -257;
 const COSE_ALGORITHM_ES256 = -7;
+const COSE_ALGORITHM_RS256 = -257;
 const PUB_KEYS = [
-  {
-    alg: COSE_ALGORITHM_RS256,
-    type: "public-key",
-    algName: "SHA256withRSA"
-  },
   {
     alg: COSE_ALGORITHM_ES256,
     type: "public-key",
     algName: "SHA256withECDSA"
+  },
+  {
+    alg: COSE_ALGORITHM_RS256,
+    type: "public-key",
+    algName: "SHA256withRSA"
   }
 ];
 
