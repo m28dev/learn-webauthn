@@ -11,12 +11,9 @@ const base64url = require('base64url');
 const app = express();
 const port = process.env.PORT || 3000;
 
-// view engine setup
-app.set('views', path.join(__dirname, 'views'));
-app.set('view engine', 'ejs');
-
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
+
 app.use(session({
   secret: process.env.COOKIE_SECRET || 'A2ey6LdvDg5NRrvC',
   resave: false,
@@ -45,11 +42,6 @@ const PUB_KEYS = [
     algName: "SHA256withRSA"
   }
 ];
-
-/* home page */
-app.get('/', (req, res) => {
-  res.render('index');
-});
 
 /* registration-start: 鍵の登録を開始する */
 app.post('/registration-start', async (req, res, next) => {
@@ -382,13 +374,6 @@ app.post('/authentication', (req, res) => {
   userInfo.credentials[credentialIndex].signCount = signCount;
 
   res.sendStatus(200);
-});
-
-/* welcome: ログイン後のページ */
-app.get('/welcome', (req, res) => {
-  // TODO
-  const user = { username: 'testtest' };
-  res.render('welcome', { user });
 });
 
 // error handler
