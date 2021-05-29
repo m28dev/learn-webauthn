@@ -227,8 +227,8 @@ app.post('/registration', (req, res) => {
     }]
   }); // TODO transports も保存したほうがいいかな？
 
-// DEBUG
-console.log('alg:', pubKeyParam.algName);
+  // DEBUG
+  console.log('alg:', pubKeyParam.algName);
 
   // 登録完了
   res.sendStatus(200);
@@ -263,6 +263,7 @@ app.post('/authentication-start', async (req, res, next) => {
       return {
         type: 'public-key',
         id: cred.credentialId
+        // TODO transportsがあるべき (7.2 - 1)
       };
     });
 
@@ -283,41 +284,68 @@ app.post('/authentication-start', async (req, res, next) => {
 
 /* authentication: 認証する */
 app.post('/authentication', (req, res) => {
-  // TODO debug → user.idになる
-  //console.log('userHandle: ', Buffer.from(req.body.response.userHandle, 'base64').toString());
 
-  // TODO
-  // - 手順.5 options.allowCredentialsで渡した中にあったcredential.idか確認
-  // - 手順.6 ユーザーがcredential.idの持ち主か？
-  // - 手順.7 credential.idから対応した公開鍵を見つけてくる
-  // - 鍵とユーザーの情報をどう持たせるか決めてからやる
+  // `authentication-start`で受け取ったユーザーIDに対して認証を実施する
+  const userid = req.session.authUserId;
+
+  if (!userid || !storage.has(userid)) {
+    throw new Error('User not found');
+  }
+
+  // 認証するユーザーの情報を取得
+  const userInfo = storage.get(userid);
+
+  /* 仕様に従い検証を行う
+   * https://www.w3.org/TR/webauthn-2/#sctn-verifying-assertion
+   */
+
+  // 5. `options.allowCredentials`で渡した中にあったcredential.idか確認
   const credentialId = req.body.credential.id;
+  const credentialIndex = userInfo.credentials.findIndex(cred => cred.credentialId == credentialId);
 
-  // responseの内容を取得
+  if (credentialIndex == -1) {
+    throw new Error('Unkown Public Key Credential');
+  }
+
+  // 6. 認証するユーザーが`credential.id`の持ち主か確認する
+  // すでに手順.5で持ち主である確認はできている
+  // 認証器側のuser.idとRP側のuser.idが一致するかの確認のみ行う
+  const userHandle = Buffer.from(req.body.response.userHandle, 'base64').toString();
+  if (userHandle && userHandle != userid) {
+    throw new Error('User is not the owner of credentialSource');
+  }
+
+  // 7. `credential.id`から対応する鍵を見つけ出す
+  // 鍵の種類により検証方法が違うため、アルゴリズムの情報も取得しておく
+  const credentialPublicKey = userInfo.credentials[credentialIndex].credentialPublicKey;
+  const credentialAlgorithm = userInfo.credentials[credentialIndex].credentialAlgorithm;
+
+  // 8. responseの内容を取得
   const cData = Buffer.from(req.body.response.clientDataJSON, 'base64');
   const authData = Buffer.from(req.body.response.authenticatorData, 'base64');
   const sig = Buffer.from(req.body.response.signature, 'base64');
 
+  // 9 to 10. cDataをデコードしてJSONパースする
   const JSONtext = cData.toString('utf-8');
   const C = JSON.parse(JSONtext);
 
-  // `C.type`の値が`webauthn.get`かどうか確認
+  // 11. `C.type`の値が`webauthn.get`かどうか確認
   if (C.type !== "webauthn.get") {
     throw new Error('C.type is not "webauthn.get"');
   }
 
-  // `C.challenge`が`options.challenge`をbase64urlエンコードしたものと一致するか確認
+  // 12. `C.challenge`が`options.challenge`をbase64urlエンコードしたものと一致するか確認
   const challengeValue = req.session.authChallenge;
   if (!challengeValue || C.challenge !== base64url.encode(challengeValue)) {
     throw new Error('C.challenge does not match');
   }
 
-  // `C.origin`がRPのオリジンと一致するか確認
+  // 13. `C.origin`がRPのオリジンと一致するか確認
   if (C.origin !== ORIGIN) {
     throw new Error('C.origin does not match');
   }
 
-  // rpIdHashを取得
+  // 15. rpIdHashを取得
   const rpIdHash = authData.slice(0, 32);
   // rpIdHashが想定しているRP IDのSHA-256ハッシュか確認
   const rpId = crypto.createHash('sha256').update(RPID).digest();
@@ -327,29 +355,15 @@ app.post('/authentication', (req, res) => {
 
   // flagsを取得
   const flags = authData.slice(32, 33).readUInt8(0);
-  // User Presentのフラグ（1bit目）が立っているか確認
+
+  // 16. User Presentのフラグ（1bit目）が立っているか確認
   const up = !!(flags & 0x01);
   if (!up) {
     throw new Error('the user is not present');
   }
 
-  // signCountを取得
-  const signCount = authData.slice(33, 37).readUInt32BE(0);
-
-  // 署名検証
+  // 19 to 20. 署名検証
   const hash = crypto.createHash('sha256').update(cData).digest();
-
-  // TODO 鍵を取得。バリデーションはここじゃないかも
-  const userid = req.session.authUserId;
-  if (!userid || !storage.has(userid)) {
-    throw new Error('User not found');
-  }
-
-  const userInfo = storage.get(userid);
-
-  const credentialIndex = userInfo.credentials.findIndex(cred => cred.credentialId == credentialId);
-  const credentialPublicKey = userInfo.credentials[credentialIndex].credentialPublicKey;
-  const credentialAlgorithm = userInfo.credentials[credentialIndex].credentialAlgorithm;
 
   const signature = new jsrsasign.KJUR.crypto.Signature({ alg: credentialAlgorithm });
   signature.init(credentialPublicKey);
@@ -360,8 +374,8 @@ app.post('/authentication', (req, res) => {
     throw new Error('Signature validation failed');
   }
 
-  // signCountを更新
-  // TODO credentials複数のとき
+  // 21. signCountを更新
+  const signCount = authData.slice(33, 37).readUInt32BE(0);
   const storedSignCount = userInfo.credentials[credentialIndex].signCount;
 
   // signCountが前回のsignCountと同じ、もしくは少ない場合はクローンされた認証器の利用が疑われる。エラーにしとく
@@ -373,7 +387,9 @@ app.post('/authentication', (req, res) => {
   // 問題なければ`authData.signCount`で更新
   userInfo.credentials[credentialIndex].signCount = signCount;
 
+  // 認証完了
   res.sendStatus(200);
+
 });
 
 // error handler

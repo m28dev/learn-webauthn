@@ -75,7 +75,9 @@ async function authentication() {
         id: Uint8Array.from(atob(credential.id), c => c.charCodeAt(0))
     }));
 
-    const credential = await navigator.credentials.get({ publicKey: options });
+    const credential = await navigator.credentials.get({ publicKey: options }).catch(err => {
+        return console.log(err); // TODO
+    });
 
     // RPサーバーにアサーションレスポンスを送り検証する
     const authResponse = await fetch('/authentication', {
