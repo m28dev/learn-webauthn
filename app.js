@@ -98,95 +98,137 @@ app.post('/registration-start', async (req, res, next) => {
 
 /* registration: 鍵を登録する */
 app.post('/registration', (req, res) => {
-  const attestationObject = Buffer.from(req.body.response.attestationObject, 'base64');
+
+  /*
+   * 仕様に従い鍵を登録する
+   * https://www.w3.org/TR/webauthn-2/#sctn-registering-a-new-credential
+   */
+
+  // 5 to 6. 認証器に渡したデータ`response.clientDataJSON`をデコードしてJSONパース
   const JSONtext = Buffer.from(req.body.response.clientDataJSON, 'base64').toString('utf8');
   const C = JSON.parse(JSONtext);
 
-  // `C.type`の値が`webauthn.create`かどうか確認
+  // 7. `C.type`の値が`webauthn.create`かどうか確認
   if (C.type !== "webauthn.create") {
     throw new Error('C.type is not "webauthn.create"');
   }
 
-  // `C.challenge`が`options.challenge`をbase64urlエンコードしたものと一致するか確認
+  // 8. `C.challenge`が`options.challenge`をbase64urlエンコードしたものと一致するか確認
   const challengeValue = req.session.regChallenge;
   if (!challengeValue || C.challenge !== base64url.encode(challengeValue)) {
     throw new Error('C.challenge does not match');
   }
 
-  // `C.origin`がRPのオリジンと一致するか確認
+  // 9. `C.origin`がRPのオリジンと一致するか確認
   if (C.origin !== ORIGIN) {
     throw new Error('C.origin does not match');
   }
 
-  // TODO attestation関連
+  // 11. response.clientDataJSONをSHA-256ハッシュにする hash TODO
 
-  // attestationObjectをCBORデコード
+
+  // 12. `attestationObject`をCBORデコードし中身を取得
+  const attestationObject = Buffer.from(req.body.response.attestationObject, 'base64');
   const decodedAttestationObject = cbor.decodeAllSync(attestationObject)[0];
+
+  const fmt = decodedAttestationObject.fmt;
   let authData = decodedAttestationObject.authData;
+  const attStmt = decodedAttestationObject.attStmt;
 
   /*
-   * authDataは下記を参考に分解していく
+   * authDataの内容を取得しながら検証していく
+   * データ構造については以下を参照
+   * 
    * https://www.w3.org/TR/webauthn-2/#authenticator-data
    */
 
-  // rpIdHashを取得
+  // `authData.rpIdHash`を取得
   const rpIdHash = authData.slice(0, 32);
   authData = authData.slice(32);
-  // rpIdHashが想定しているRP IDのSHA-256ハッシュか確認
+
+  // 13. rpIdHashが想定しているRP IDのSHA-256ハッシュか確認
   const rpId = crypto.createHash('sha256').update(RPID).digest();
   if (!rpId.equals(rpIdHash)) {
     throw new Error('rpIdHash does not match the expected RP ID hash');
   }
 
-  // flagsを取得
+  // `authData.flags`を取得
   const flags = authData.slice(0, 1).readUInt8(0);
   authData = authData.slice(1);
 
-  // User Presentのフラグ（1bit目）が立っているか確認
+  // 14. User Presentのフラグ（1bit目）が立っているか確認
   const up = !!(flags & 0x01);
   if (!up) {
     throw new Error('the user is not present');
   }
 
-  // signCountを取得
+  // `authData.signCount`を取得
   const signCount = authData.slice(0, 4);
   authData = authData.slice(4);
 
-  // TODO Bit 6: Attested credential data included (AT). の確認もする？？
-  // TODO これ以降、どこの何を取得しているのかコメントを残す（Attested credential dataのaaguidを取得してる。など）
-  // https://www.w3.org/TR/webauthn-2/#sctn-attested-credential-data
+  /*
+   * ここからはAttested credential data (authData.attestedCredentialData) の内容を取得していく
+   * データ構造については以下を参照
+   * 
+   * https://www.w3.org/TR/webauthn-2/#sctn-attested-credential-data
+   */
 
-  // aaguidを取得
+  // `attestedCredentialData.aaguid`を取得
   const aaguid = authData.slice(0, 16);
   authData = authData.slice(16);
 
-  // credentialIdLengthを取得
+  // `attestedCredentialData.credentialIdLength`を取得
   const credentialIdLength = authData.slice(0, 2).readUInt16BE(0);
   authData = authData.slice(2);
 
-  // credentialIdを取得
+  // `attestedCredentialData.credentialId`を取得
   const credentialId = authData.slice(0, credentialIdLength);
   authData = authData.slice(credentialIdLength);
 
-  // credentialPublicKeyを取得
+  // `attestedCredentialData.credentialPublicKey`を取得
   const credentialPublicKey = cbor.decodeAllSync(authData)[0];
 
-  // algが鍵の作成時に`options.pubKeyCredParams`で指定したものになっているか確認する
+  /*
+   * ここからは鍵の内容の取得と検証をしていく
+   * 鍵はCOSE Keyというフォーマットになっている
+   * RFC 8152にて定義されているが、いくつかの例が以下の通り仕様書にも記載されている
+   * 
+   * https://www.w3.org/TR/webauthn-2/#sctn-encoded-credPubKey-examples
+   */
+
+  // 16. `credentialPublicKey.alg`が鍵の作成時に`options.pubKeyCredParams`で指定したものになっているか確認する
   const alg = credentialPublicKey.get(3);
   const pubKeyParam = PUB_KEYS.find(obj => obj.alg == alg);
   if (!pubKeyParam) {
     throw new Error('alg does not match');
   }
 
-  // TODO Extensionsは無視していることをコメントに残す？
+  /*
+   * 18 to 21. 
+   *  attStmt（どのような認証器が使われたのか）を検証
+   *  また、そのAttestation TypeがRPのポリシーとして受け入れられるか確認
+   * 
+   * 各Attestation Statement Formatの検証については以下を参照する
+   * https://www.w3.org/TR/webauthn-2/#sctn-defined-attestation-formats 
+   */
 
-  // TODO 18. のfmt判定は後で
+  // TODO 「None Attestation Statement Format」しかサポートしていない 
+  switch (fmt) {
+    case "None":
+      break;
+    default:
+      break;
+  }
 
-  // TODO コメント書く → 今回はサンプルなので鍵をそのまま登録する
-  // 手順.22に従い、同じ鍵が別のユーザーに登録されていないか確認する必要あり
+  // 22. 登録する鍵が他のユーザーで登録済みか`credentialId`をもとに確認する
+  // TODO
 
-  // ユーザーと鍵を登録する
-  // credentialPublicKeyをJWKの形式に変換して保存する
+  // 23. ユーザーを以下の内容と共に登録する
+  //  - CredentialId (credentialId)
+  //  - 鍵 (credentialPublicKey)
+  //  - 認証器が使用された回数 (authData.signCount)
+
+  // credentialPublicKeyはJWKの形式に変換して保存する
   let pubkeyJwk;
 
   switch (alg) {
@@ -212,7 +254,6 @@ app.post('/registration', (req, res) => {
       break;
   }
 
-  // TODO 保存する内容これでOK？ よむ： https://www.w3.org/TR/webauthn-2/#dom-publickeycredentialcreationoptions-user
   const userid = req.session.regUser.id;
   const username = req.session.regUser.username
 
@@ -222,16 +263,17 @@ app.post('/registration', (req, res) => {
     credentials: [{
       credentialId: credentialId.toString('base64'),
       credentialPublicKey: pubkeyJwk,
-      credentialAlgorithm: pubKeyParam.algName,
-      signCount: signCount.readUInt16BE(0)
+      signCount: signCount.readUInt16BE(0),
+      credentialAlgorithm: pubKeyParam.algName // 署名アルゴリズムごと検証手順が違うため、後で見分けられるように登録
     }]
-  }); // TODO transports も保存したほうがいいかな？
+  }); // TODO `credential.response.getTransports()`が返すtransport hintsも保存した方がよい
 
   // DEBUG
   console.log('alg:', pubKeyParam.algName);
 
   // 登録完了
   res.sendStatus(200);
+
 });
 
 /* authentication-start: 認証開始 */
@@ -295,7 +337,8 @@ app.post('/authentication', (req, res) => {
   // 認証するユーザーの情報を取得
   const userInfo = storage.get(userid);
 
-  /* 仕様に従い検証を行う
+  /* 
+   * 仕様に従い検証を行う
    * https://www.w3.org/TR/webauthn-2/#sctn-verifying-assertion
    */
 
