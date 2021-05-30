@@ -311,7 +311,7 @@ app.post('/authentication-start', async (req, res, next) => {
       return {
         type: 'public-key',
         id: cred.credentialId
-        // TODO transportsがあるべき (7.2 - 1)
+        // TODO `allowCredentials`に中身がある場合は`transports`もあるべき
       };
     });
 
