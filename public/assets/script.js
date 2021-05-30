@@ -3,7 +3,6 @@ async function registration() {
 
     // ユーザー名を取得
     const username = document.getElementById('username').value;
-    if (!username) return false; // TODO onSubmit + requiredの方がいいのかも
 
     // 鍵生成のオプションをRPサーバーから取得
     const opResponse = await fetch('/registration-start', {
@@ -16,7 +15,9 @@ async function registration() {
     });
 
     if (!opResponse.ok) {
-        return console.error('ErrorResponse:', opResponse);
+        document.getElementById('message').innerText = 'エラーが発生しました';
+        console.error('ErrorResponse:', opResponse);
+        return;
     }
 
     // 取得したオプションを認証器に渡し、鍵を生成してもらう
@@ -64,7 +65,9 @@ async function authentication() {
     });
 
     if (!opResponse.ok) {
-        return console.error('ErrorResponse:', opResponse);
+        document.getElementById('message').innerText = 'エラーが発生しました';
+        console.error('ErrorResponse:', opResponse);
+        return;
     }
 
     // 取得したオプションを認証器に渡しアサーションレスポンスをもらう
@@ -75,9 +78,7 @@ async function authentication() {
         id: Uint8Array.from(atob(credential.id), c => c.charCodeAt(0))
     }));
 
-    const credential = await navigator.credentials.get({ publicKey: options }).catch(err => {
-        return console.log(err); // TODO
-    });
+    const credential = await navigator.credentials.get({ publicKey: options });
 
     // RPサーバーにアサーションレスポンスを送り検証する
     const authResponse = await fetch('/authentication', {
@@ -100,7 +101,7 @@ async function authentication() {
     });
 
     // 結果を画面に表示
-    const message = authResponse.ok ? 'ログイン成功！' : 'エラーが発生しました'; // TODO
+    const message = authResponse.ok ? 'ログイン成功！' : 'エラーが発生しました';
     document.getElementById('message').innerText = message;
 }
 

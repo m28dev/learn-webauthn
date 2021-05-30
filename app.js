@@ -55,6 +55,12 @@ app.post('/registration-start', async (req, res, next) => {
 
     // ユーザー名を取得
     const username = req.body.username;
+
+    // 登録にはユーザー名が必要
+    if (!username) {
+      throw new Error('username is required');
+    }
+
     // ユーザーIDを生成
     // 本来はユーザーを特定できない識別子にすべき
     // サンプルの仕様上、あとで扱いやすいユーザー名をIDとしている
